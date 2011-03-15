@@ -1,0 +1,444 @@
+<?php
+/**
+ * @file
+ * The Youtube Upload Drupal gets the Google YouTube upload direct-from-browser upload working.
+ */
+include_once (drupal_get_path("module","youtube_upload") . '/youtube_upload.inc'); 
+
+/**
+ * Implementation of hook_help().
+ */
+function youtube_upload_help($path, $arg) {
+  switch ($path) {
+    case 'admin/help#youtube_upload':
+      return '<p>'. t('The Youtube_upload module uses the Zend Framework to upload Youtube.') .'</p>';
+    case 'admin/settings/youtube_upload':
+      return '<p>'. t('The Youtube_Upload module uses the Zend Framework to upload to Youtube.') .'</p>';
+  }
+}
+
+/**
+ * Implementation of hook_menu().
+ */
+function youtube_upload_menu() {
+  $items['admin/settings/youtube_upload'] = array(
+  'title' => 'Youtube Upload',
+  'description' => 'Configuration options for Youtube Upload',
+  'page callback' => 'drupal_get_form',
+  'page arguments' => array('youtube_upload_admin'),
+  'access arguments' => array('access administration pages'),
+  'type' => MENU_NORMAL_ITEM,
+  'file' => 'youtube_upload.admin.inc',
+  );
+  $items['video_upload'] = array( 
+  'title' => 'Upload directly to YouTube from browser', 
+  'page callback' => 'youtube_upload_page', 
+  'access arguments' => array('access content'), 
+  );
+  $items['video_upload_thanks'] = array( 
+  'title' => 'Thanx for uploading video', 
+  'page callback' => 'youtube_upload_thanks_page', 
+  'access arguments' => array('access content'), 
+  );
+  $items['video_upload_reset'] = array( 
+  'title' => 'Reset video uploader', 
+  'page callback' => 'youtube_upload_reset_page', 
+  'access arguments' => array('access content'), 
+  );
+  return $items;
+}
+
+/**
+* Pages
+*/
+
+/**
+* youtube_upload_page is the master page for uploading - it branches based on whether the 
+* $_SESSION['google_auth_token'] is suitable.
+*/
+
+function youtube_upload_page() {
+  $debug = (bool)variable_get('youtube_upload_debug', '');
+  $output = t('By submitting your video you are attesting that your video and the content within is true.'); 
+  $_SESSION['developerKey'] = variable_get('youtube_upload_api_code', '');
+  if (!isset($_SESSION['google_auth_token'])) {
+  // null Google auth token means launch the metadata form!
+    $output .= "<br />Token Status: <b>Youtube Token is not set</b><br>";
+    $output .= drupal_get_form('youtube_upload_metadata_form'); 
+    watchdog('youtube_upload', 'Null token upload form ' . $_SESSION['google_auth_token'], array(), WATCHDOG_INFO);
+    $output .= "<br />After submitting your information you will be automatically taken to the next step.  Please wait.";
+  }
+  else { 	
+    //ready to try the upload form 
+    $output .= "<br />Token Status: <b>OK - YouTube Token is set</b><br>";
+    if ($debug) {
+      $output .= "<br /><small>$_SESSION Youtube Token= [<b>" . t($_SESSION['google_auth_token']) . "</b>] OK.";
+      drupal_set_message(t('$_SESSIONS: Post Url:<b>' . $_SESSION['youtube_upload_post_url'] . '</b><br> and tokenvalue [<b>' . $_SESSION['google_auth_token'] . '</b>] OK'));
+      drupal_set_message(t('$form_state post Url: [<b>' . $form_state['youtube_upload']['post_url'] . '</b>] and tokenvalue: [<b>' . $form_state['youtube_upload']['token_value'] . '</b>] so nice!'));
+    }
+    watchdog('youtube_upload', 'Youtube Token is ' . $_SESSION['google_auth_token'], array(), WATCHDOG_INFO);
+    $output .= "<br /><br /> \n\n";
+    $output .= drupal_get_form('youtube_upload_final_form'); 
+  }
+  $output .= '<br /><br /> If something goes wrong try <a href="/video_upload_reset">resetting the upload form</a>. By clicking Submit you are granting this <a href="http://creativecommons.org/licenses/by/3.0/us/">Creative Commons license</a> to MyRapidReport.com<br /><br />'; 
+  return $output;
+}
+
+
+
+/** 
+ * The Reset page
+ */ 
+
+function youtube_upload_reset_page() {
+  $output = t('Please hit the button below to clear your session and token too. <br />');
+  $output .= t('The $_SESSION google_auth_token and youtube_upload_post_url will be cleared.');
+  $output .= drupal_get_form('youtube_upload_reset_form'); 
+  return $output;
+  }
+  
+  /** 
+ * The Thanks for uploading page
+ * This also logs the facts of the uploaded video appropriately.
+ */ 
+
+
+function youtube_upload_thanks_page() {
+   $debug = (bool)variable_get('youtube_upload_debug', '');
+  $final_id = $_GET['id']; 
+  $final_status = $_GET['status'];
+  $output = t('<h3>Thanks for uploading</h3>');
+  if ($final_status = '200') {
+    $output .= t('<p> Upload succeeded! Your video should be available soon at: <b>') ;
+    $output .= t('<a href="http://youtube.com/watch?v=' . $final_id . '">http://youtube.com/watch?v=' . $final_id . '</a></b></p>' );
+    watchdog('youtube_upload', 'Video up at: <a href="http://youtube.com/watch?v=' . $final_id . '"> uploaded here</a> via Token ' . substr($_SESSION['google_auth_token'], 0, 8) . '...' , array(), WATCHDOG_NOTICE);
+    watchdog('youtube_upload', 'Video <a href="http://youtube.com/watch?v=' . $final_id . '"> ' . $final_id . '</a> by ' . $_SESSION['youtube_upload_user_name'] . ' in ' . $_SESSION['youtube_upload_zipcode'], array(), WATCHDOG_NOTICE);
+    // comma delimited watchdog warning CSV for your uses!
+    watchdog('youtube_upload', 'CSV, ' . $final_id . ', ' . $_SESSION['youtube_upload_user_name'] . ', ' . $_SESSION['youtube_upload_email'] . ', ' . $_SESSION['youtube_upload_zipcode'], array(), WATCHDOG_WARNING);
+    drupal_set_message(t('Upload completed! Result 200 - OK'));
+  }
+  else { //FAIL!!
+    $output .= t('<p> Upload failed! Error code= ' . $final_status . '<br> Sorry, but you can <a href="/video_upload_reset">reset the uploader</a> and try again.');
+    watchdog('youtube_upload', 'Video upload failed, error=' . $final_status . '</a> by ' . $_SESSION['youtube_upload_user_name'] . ' in ' . $_SESSION['youtube_upload_zipcode'], array(), WATCHDOG_NOTICE);
+    }
+  if ($debug) {
+    $output .= t("<br /><small>Youtube Token was <b>" . t($_SESSION['google_auth_token']) . "</b></small>");
+  }
+  $output .= t('<br /><br />Thanks for submitting! <strong>Please email your name, zip code and title of your video</strong> to info@myrapidreport.com so we can contact you if needed.<br /><br /> If you need to upload another video please click <a href="/video_upload_reset">here to reset the YouTube uploader.</a></p>');
+  return $output; 
+}
+ /** 
+* Forms!
+*/ 
+
+function youtube_upload_metadata_form() {	
+  $form = array();
+  $form['#redirect'] = 'video_upload'; // default= goes to same page == $_GET['q']
+  // TODO: fix URL to video formats
+  $form['data_form_fieldset'] = array(
+    '#description' => 'Enter your videos title, description, and tags (optional), then hit Submit. You will then be able to select the file to upload.',
+    '#title' => 'YouTube Video Uploader',
+    '#weight' => '6',
+    '#type' => 'fieldset',
+    );
+  $form['data_form_fieldset']['title'] = array(
+    '#description' => 'Official YouTube video title',
+    '#required' => '1',
+    '#weight' => '0',
+    '#type' => 'textfield',
+    '#title' => 'Video Title',
+    );
+  $form['data_form_fieldset']['zipcode'] = array(
+    '#description' => 'Please provide the Zip code this video is from',
+    '#required' => '1',
+    '#weight' => '-5',
+    '#type' => 'textfield',
+    '#title' => 'Zip code',
+    );
+  $form['data_form_fieldset']['uploader_name'] = array(
+    '#description' => 'Your name, please',
+    '#required' => '1',
+    '#weight' => '-6',
+    '#type' => 'textfield',
+    '#title' => 'Your name',
+    );
+  $form['data_form_fieldset']['email'] = array(
+    '#description' => 'Your email address, please. This is to contact you for followups only.',
+    '#required' => '1',
+    '#weight' => '-5',
+    '#type' => 'textfield',
+    '#title' => 'Your email',
+    );
+  $form['data_form_fieldset']['description'] = array(
+    '#input_format' => '1',
+    '#rows' => '5',
+    '#default_value' => '-insert description here-',
+    '#description' => 'Please add a description for the video',
+    '#required' => '1',
+    '#type' => 'textarea',
+    '#title' => 'Video Description',
+    '#weight' => '2',
+    // '#element_validate' => array('youtube_upload_metadata_form_description_validate') if you want, fires first
+    );
+  $form['data_form_fieldset']['tags'] = array(
+    '#description' => 'Separate your tags with commas, please include MyRapidReport as a tag.',
+    '#required' => '0',
+    '#weight' => '4',
+    '#type' => 'textfield',
+    '#title' => 'Tags',
+    '#default_value' => 'MyRapidReport, ',
+  );
+  $form['data_form_fieldset']['category'] = array(
+    '#weight' => '5',
+    '#default_value' => 'News',
+    '#description' => 'For now it is only News & Politics.',
+    '#required' => '1',
+    '#type' => 'select',
+    '#options' => array(
+      'News' => 'News & Politics',
+    ),
+    '#multiple_toggle' => '1',
+    '#key_type' => 'custom',
+    '#title' => 'Select YouTube video category',
+   );
+   $form['data_form_fieldset']['submit'] = array( 
+    '#type' => 'submit', 
+    '#value' => t('Submit metadata to Youtube...'),
+    '#weight' => '8',
+   ); 
+  return $form;
+}
+
+
+/** 
+* Generates the final upload form which will post with 
+* the correct token in hidden field to YouTube! 
+*/ 
+function youtube_upload_final_form() {
+  //submit file!!
+  //upload file button with token field
+  $form = array();
+  //$form['#pre_render']
+  // $form['#after_build']
+  $form['upload_form_fieldset'] = array(
+    '#description' => 'Select the video file to upload.',
+    '#title' => 'YouTube Video Uploader',
+    '#weight' => '6',
+    '#type' => 'fieldset',
+  );
+  //TODO: fix URL to Youtube Format infos
+  $form['upload_form_fieldset']['file_upload'] = array(
+    '#weight' => '3',
+    '#description' => 'Navigate to the video file on your hard drive.',
+    '#type' => 'file',
+    '#size' => '30',
+    '#title' => 'Upload video file from your computer',
+  );
+  $form['upload_form_fieldset']['token'] = array( 
+        '#type' => 'hidden', 
+        '#value' => $_SESSION['google_auth_token'], 
+        //$form_state['youtube_upload']['token_value'], 
+      );
+  $form['upload_form_fieldset']['submit'] = array( 
+    '#type' => 'submit', 
+    '#value' => t('Upload video to Youtube (please be patient)'),
+    '#weight' => '8',
+   ); 
+  $form['#action'] = $_SESSION['youtube_upload_post_url'] . '?nexturl='. 'http://myrapidreport.com/video_upload_thanks';
+      //$form_state['youtube_upload']['post_url'];
+  $form['#method'] = 'post'; 
+  //$form['#action'] = $postUrl . '?nexturl=' . $nextUrl; 
+  $form['#attributes'] = array( 
+		'enctype' => 'multipart/form-data' // ,
+		//'target' => 'name_of_target_frame' 
+	); 
+  return $form;
+}
+
+function youtube_upload_reset_form() {	
+  $form = array();
+  $form_state['redirect']; // default= goes to same page == $_GET['q']
+  $form['reset_form_fieldset'] = array(
+    '#description' => 'Simply hit the reset button to clear the sessions and tokens',
+    '#title' => 'YouTube Video Uploader reset!',
+    '#weight' => '6',
+    '#type' => 'fieldset',
+    );
+
+   $form['reset_form_fieldset']['submit'] = array( 
+    '#type' => 'submit', 
+    '#value' => t('Reset tokens and sessions'),
+    '#weight' => '8',
+   ); 
+   $form['#redirect'] = 'video_upload';
+  return $form;
+}
+ /** 
+* Forms validators!
+*/ 
+
+/** 
+* Validate the metadata form. 
+* Lets put the Google Youtube token checkin here - 
+* TODO: we can throw awesome error if token fail... 
+*/ 
+
+function youtube_upload_metadata_form_validate($form, &$form_state) { 
+  $debug = (bool)variable_get('youtube_upload_debug', '');
+  //get us some nice Zend classes via Zend module call
+  if (zend_initialize('Zend_Gdata_YouTube')) {
+    // zend load ok
+  }
+  else {
+    drupal_set_message(t('Zend_Gdata_YouTube initialization failed'));
+    watchdog('youtube_upload', "Zend_Gdata_YouTube failed for " . ($form_state['values']['uploader_name']), array(), WATCHDOG_WARNING);
+  }
+  if (zend_initialize('Zend_Exception')) {
+    // zend load ok
+  }
+  else {
+    drupal_set_message(t('Zend_Exception initialization failed'));
+    watchdog('youtube_upload', "Zend_Exception failed for " . ($form_state['values']['uploader_name']), array(), WATCHDOG_WARNING);
+  }
+  if (zend_initialize('Zend_Gdata_ClientLogin')) {
+    // zend load ok
+  }
+  else {
+  drupal_set_message(t('Zend_Gdata_ClientLogin initialization failed'));
+  watchdog('youtube_upload', "Zend_Gdata_ClientLogin failed for " . ($form_state['values']['uploader_name']), array(), WATCHDOG_WARNING);
+  }
+
+  //for the other (manual) style of class loading, these were used::
+    //Zend_Loader::loadClass('Zend_Gdata_YouTube');
+    //Zend_Loader::loadClass('Zend_Gdata_App_HttpException');
+  //lets go and make a Zend GoogleMovie thing
+  watchdog('youtube_upload', "Validating form for " . ($form_state['values']['uploader_name']), array(), WATCHDOG_NOTICE);
+  $yt_login = variable_get('youtube_upload_account', '');
+  $yt_passwd = variable_get('youtube_uploads_account_passwd', '');
+  $clientId = variable_get('youtube_upload_app_name_code', '');
+  $developerKey =  variable_get('youtube_upload_api_code', '');
+    
+    // save the user/email/zip into the Session 
+    $_SESSION['youtube_upload_user_name'] = ($form_state['values']['uploader_name']);
+    $_SESSION['youtube_upload_zipcode'] = ($form_state['values']['zipcode']);
+    $_SESSION['youtube_upload_email'] = ($form_state['values']['email']);
+
+// TODO - add these resets to the reset form!
+    
+    $authenticationURL= 'https://www.google.com/youtube/accounts/ClientLogin';
+    //time for the complex Zend Http Client authentication!
+   
+   //TODO fix string passage from Variables!!
+  $httpClient = Zend_Gdata_ClientLogin::getHttpClient(
+  $username = variable_get('youtube_upload_account', ''),
+  $password = variable_get('youtube_upload_account_passwd', ''),
+  $service = 'youtube',
+  $client = null,
+  $source = $yt_passwd = variable_get('youtube_upload_app_name_code', ''), 
+  // a short string identifying your application
+  $loginToken = null,
+  $loginCaptcha = null,
+  $authenticationURL);
+  try {    
+    $yt = new Zend_Gdata_YouTube($httpClient,$applicationId,$clientId,$developerKey);
+  }
+  catch (Zend_Exception $e) {  
+    echo "Caught exception: " . get_class($e) . "\n";
+    echo "Message: " . $e->getMessage() . "\n";
+     //echo "Error: " . $exception->getResponse()->getRawBody();  
+   }
+  // time to make the video object
+  $myVideoEntry = new Zend_Gdata_YouTube_VideoEntry();
+  //lets populate its metadata fields
+  $myVideoEntry->setVideoTitle($form_state['values']['title']);
+  $myVideoEntry->setVideoDescription($form_state['values']['description']);
+ // Note that category must be a valid YouTube category
+  $myVideoEntry->setVideoCategory($form_state['values']['category']);
+  if ($form_state['values']['tags'] != 'none') {
+    $myVideoEntry->SetVideoTags($form_state['values']['tags']);
+  }
+  // lets get a token from this getFormUploadToken
+  // then lets call up youtube with http_request with fancy headers
+  // TODO: this URL should be settable in the Admin
+  $tokenHandlerUrl = 'http://gdata.youtube.com/action/GetUploadToken';
+  try {
+    $tokenArray = $yt->getFormUploadToken($myVideoEntry, $tokenHandlerUrl);
+  }
+  catch (Zend_Gdata_App_HttpException $httpException) {
+        print 'ERROR ' . $httpException->getMessage()
+            . ' HTTP details<br /><textarea cols="100" rows="20">'
+            . $httpException->getRawResponseBody()
+            . '</textarea><br />'
+            . '<a href="session_details.php">'
+            . 'click here to view details of last request</a><br />';
+        return;
+  } catch (Zend_Gdata_App_Exception $e) {
+        print 'ERROR - Could not retrieve token for syndicated upload. '
+            . $e->getMessage()
+            . '<br /><a href="session_details.php">'
+            . 'click here to view details of last request</a><br />';
+        return;
+  } catch (Zend_Exception $e) {
+    echo "Caught exception: " . get_class($e) . "\n";
+    echo "Message: " . $e->getMessage() . "\n";
+  }
+  // we have gotten a token array!
+  $tokenValue = $tokenArray['token'];
+  $postUrl = $tokenArray['url'];
+// lets save postUrl and tokenValue to make the next form!
+// having some trouble with form_state so try that and sessions too
+  $form_state['youtube_upload']['post_url'] = $postUrl;
+  $form_state['youtube_upload']['token_value'] = $tokenValue;
+  
+  $_SESSION['google_auth_token'] = $tokenValue; // for the form switcher!
+  $_SESSION['youtube_upload_post_url'] = $postUrl;
+// debug messages for your tokens available
+  if ($debug) {
+    drupal_set_message(t('$form_state: post Url= <b>' . $form_state['youtube_upload']['post_url'] . '</b> <br /> $form_state: token_value= <b>' . $form_state['youtube_upload']['token_value'] . '</b> = Nice!'));
+    drupal_set_message(t('$_SESSIONS: Post Url:<b>' . $_SESSION['youtube_upload_post_url'] . '</b><br /> Google auth token=<b>' . $_SESSION['google_auth_token'] . '</b> Nice!'));
+  }
+// Log it
+  watchdog('youtube_upload', "Token obtained for video: " . ($form_state['values']['title']), array(), WATCHDOG_NOTICE);
+  //Tell it to user
+  if ($debug) {
+    drupal_set_message("Somehow... the post and token have been returned!");
+  }
+} 
+
+/** 
+* Validate/run the reset form. Clear this thing up to fix old sessions for the casual users.
+*/ 
+
+// TODO - add clear Zip and Username $_session
+
+function youtube_upload_reset_form_validate($form, &$form_state) { 
+  $debug = (bool)variable_get('youtube_upload_debug', '');
+
+  watchdog('youtube_upload', "Resetting an upload session", array(), WATCHDOG_NOTICE);
+  $clientId = variable_get('youtube_upload_app_name_code', '');
+  $developerKey =  variable_get('youtube_upload_api_code', '');
+  $authenticationURL= 'https://www.google.com/youtube/accounts/ClientLogin';
+  unset($_SESSION['google_auth_token']);
+  unset($_SESSION['youtube_upload_post_url']);
+  if ($debug) {
+    drupal_set_message(t('Cleared? $form_state post Url clear? [<b>' . $form_state['youtube_upload']['post_url'] . '</b>] <br>and tokenvalue [<b>' . $form_state['youtube_upload']['token_value'] . '</b>] Ok?'));
+    drupal_set_message(t('Cleared? $_SESSIONS Post Url: [<b>' . $_SESSION['youtube_upload_post_url'] . '</b><br>and tokenvalue <b>' . $_SESSION['google_auth_token'] . '</b>] Ok?'));
+  }
+  watchdog('youtube_upload', 'Session got cleared via reset form', array(), WATCHDOG_NOTICE);
+  drupal_set_message("Somehow... the post and token have been cleared!");
+  //drupal_set_message(print("Session : ") . print_r($_SESSION)); 
+} 
+
+/** 
+* Misc stuff.
+* Clear_auth_token for your needs of clearing tokens.
+*/ 
+
+function clear_auth_token() {
+  unset($_SESSION['google_auth_token']);
+  watchdog('youtube_upload', 'Youtube Token clearing', array(), WATCHDOG_NOTICE);
+  drupal_set_message(t("Youtube Token cleared!"));
+  unset($form_state['youtube_upload']);
+  drupal_set_message(t("Erased the cache of form stuff too"));
+  watchdog('youtube_upload', 'Youtube form clearing', array(), WATCHDOG_NOTICE); 
+}

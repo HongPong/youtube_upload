@@ -1,0 +1,8 @@
+name = YouTube Upload
+version = 6.x-1.x-beta1
+description = "Uses the Zend Framework&rsquo;s GData to upload directly to Youtube from Web browsers."
+core = 6.x
+php = 5.1.4
+version = "6.x-1.0-beta1"
+dependencies[] = zend
+; dependencies[] = google_auth
